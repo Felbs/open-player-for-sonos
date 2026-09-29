@@ -1,0 +1,6 @@
+# Open Player for Sonos: lets swyh-rs record what plays into the virtual "Sonos" output
+pcm.openplayer {
+    type pipewire
+    capture_node "openplayer_capture"
+    hint { show on description "openplayer" }
+}
