@@ -53,3 +53,28 @@ def test_netreport_finds_trouble_and_marks(tmp_path, monkeypatch):
     assert "test: Kitchen·10 (2×)" in out                   # the mark lines up with it
     assert "Kitchen·10 ↔ Patio·11: 14" in out                 # weak link
     assert "(laptop→router)" in out
+
+
+def test_leader_ranking_prefers_reliable_5ghz(tmp_path, monkeypatch):
+    from openplayer import leader
+    monkeypatch.setattr(netwatch, "DIR", tmp_path)
+    monkeypatch.setattr(leader, "MIN_ROUNDS", 10)
+    now = time.time()
+    rows = []
+    for i in range(50):
+        rows.append({"t": now - 300 + i * 5, "k": "ping", "ms": {
+            "Den·21": 400.0 if i % 5 == 0 else 9.0,    # often slow
+            "Hall·22": 8.0,                            # solid, but on 2.4 GHz
+            "Loft·23": 7.0,                            # solid, 5 GHz
+            "router": 900.0 if i == 1 else 3.0}})      # a laptop-side hiccup: ignored
+    rows.append({"t": now - 10, "k": "radio", "speakers": {
+        "Den·21": {"mhz": 5805}, "Hall·22": {"mhz": 2437}, "Loft·23": {"mhz": 5805}}})
+    (tmp_path / netwatch._file().name).write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    class Z:
+        def __init__(self, name, ip):
+            self.player_name, self.ip_address = name, ip
+    zones = [Z("Den", "192.0.2.21"), Z("Hall", "192.0.2.22"), Z("Loft", "192.0.2.23")]
+    ordered, source, _ = leader.rank(zones)
+    assert source == "history"
+    assert [z.player_name for z in ordered] == ["Loft", "Den", "Hall"]

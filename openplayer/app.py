@@ -905,9 +905,10 @@ class OpenPlayer(App):
             self.say(f"{what} → {', '.join(where)}…")
 
             def go(zones):
-                choose.play(zones, name, where, choice)
+                lead = choose.play(zones, name, where, choice)
+                led = f" (led by {lead.player_name}, the best connection)" if len(where) > 1 else ""
                 self.call_from_thread(self.say, f"{'Stopped' if choice['kind'] == 'stop' else 'Playing ' + what} "
-                                                f"in {', '.join(where)}.")
+                                                f"in {', '.join(where)}{led if choice['kind'] != 'stop' else ''}.")
             self.link.do(go)
         self.push_screen(PlayMenu(name, rooms, pre), picked)
 
