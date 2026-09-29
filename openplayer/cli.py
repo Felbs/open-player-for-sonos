@@ -26,7 +26,7 @@ from . import core, laptop
 
 def _vol(zone, arg):
     if arg is None:
-        return zone.group.volume if len(zone.group.members) > 1 else zone.volume
+        return zone.volume
     target = zone.volume + int(arg) if arg[0] in "+-" else int(arg)
     zone.volume = max(0, min(100, target))
     if zone.volume != max(0, min(100, target)):
