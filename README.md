@@ -68,9 +68,42 @@ openplayer rooms                     openplayer vol Kitchen 30
 openplayer apple Kitchen take five   openplayer radio Kitchen so what
 openplayer laptop Living Room        openplayer laptop off
 openplayer join Patio Kitchen        openplayer netreport 2
+openplayer leaders                   openplayer lead
 ```
 
 `openplayer help` lists everything.
+
+## Diagnosing dropouts
+
+If speakers sometimes cut out, go quiet in one room, or drift out of sync, the
+network monitor can show you why. It's light: a ping to each speaker every
+5 seconds, plus each speaker's own radio statistics once a minute.
+
+1. Turn it on: `openplayer monitor on` (or install with `--with-monitor`).
+2. Play music in several rooms as you normally would.
+3. **Mark each dropout the moment you hear it:** press `d` in the app or run
+   `openplayer dropout`. These marks make the report far more useful.
+4. After an evening (or a night) run `openplayer netreport 12`. It shows:
+   - each speaker's missed or slow replies, its radio errors per minute and the band and channel it uses;
+   - "trouble moments", when one or more speakers stopped answering;
+   - what was happening around each dropout you marked;
+   - the weakest speaker-to-speaker signals.
+
+   The laptop's own link to the router is measured as well, so hiccups on the
+   laptop's side don't get blamed on your speakers.
+5. `openplayer leaders` ranks your rooms as **group leaders**. The leader
+   receives the music and feeds every other room, so a shaky leader makes the
+   whole group stumble. When you tick several rooms, the app picks the best
+   leader automatically. `openplayer lead` hands the current group to the best
+   room without stopping the music.
+
+What it found in the home it was built in, and the fixes that came out of it:
+- **One speaker on the router's crowded 2.4 GHz Wi-Fi** logged 20–40× more radio
+  errors than the others. **Wiring one speaker to the router with Ethernet**
+  switched the system to Sonos's own network (SonosNet), and replies got
+  faster across the board.
+- **A weak or older speaker leading the group** caused trouble in other rooms.
+  Older "legacy" models are now ranked last as leaders.
 
 ## Good to know
 

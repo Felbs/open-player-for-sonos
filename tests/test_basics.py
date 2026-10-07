@@ -75,9 +75,13 @@ def test_leader_ranking_prefers_reliable_5ghz(tmp_path, monkeypatch):
         def __init__(self, name, ip):
             self.player_name, self.ip_address = name, ip
     zones = [Z("Den", "192.0.2.21"), Z("Hall", "192.0.2.22"), Z("Loft", "192.0.2.23")]
+    monkeypatch.setattr(leader, "_legacy", lambda z: False)
     ordered, source, _ = leader.rank(zones)
     assert source == "history"
     assert [z.player_name for z in ordered] == ["Loft", "Den", "Hall"]
+    # an old (legacy) speaker goes last even with the best numbers
+    monkeypatch.setattr(leader, "_legacy", lambda z: z.player_name == "Loft")
+    assert [z.player_name for z in leader.rank(zones)[0]] == ["Den", "Hall", "Loft"]
 
 
 def test_ask_any_skips_a_speaker_that_fails_mid_request(monkeypatch):

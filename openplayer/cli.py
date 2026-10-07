@@ -51,9 +51,9 @@ def main(argv=None):
         ordered, source, scores = leader.rank(core.rooms())
         print(f"Best group leader first (from {'the network monitor' if source == 'history' else 'a quick live test'}):")
         for z in ordered:
-            bad, med, slow = scores[leader.key(z)]
-            print(f"  {z.player_name:13} trouble {bad * 100:5.2f}%   median {med:5.1f} ms   "
-                  f"{'2.4 GHz (crowded)' if slow else '5 GHz'}")
+            bad, med, slow, old = scores[leader.key(z)]
+            notes = ", ".join(n for n, on in (("older model", old), ("on crowded 2.4 GHz Wi-Fi", slow)) if on)
+            print(f"  {z.player_name:13} trouble {bad * 100:5.2f}%   median {med:5.1f} ms   {notes}")
     elif cmd == "lead":
         from . import leader
         rooms = core.rooms()

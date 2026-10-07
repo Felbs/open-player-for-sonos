@@ -9,16 +9,26 @@ rooms by how reliably their main speaker has answered:
    the laptop's own link to the router was fine, so laptop hiccups don't count.
 2. Otherwise from a quick live test: a few pings to each candidate.
 
-Speakers on the crowded 2.4 GHz band are always ranked after 5 GHz ones.
+Then, regardless of the numbers:
+- older "legacy" speakers (Sonos stopped feature updates for them) come
+  last: leading a big group is the heaviest job, and on 10/07 a first-gen
+  SYMFONISK lamp kept going unresponsive while leading six rooms;
+- a speaker joined to the router's crowded 2.4 GHz Wi-Fi comes after 5 GHz
+  ones. (On SonosNet every speaker uses 2.4 GHz, so that rule doesn't apply.)
 """
 import concurrent.futures as cf
 import json
+import re
+import urllib.request
 import statistics
 import time
 
 from . import netwatch
 
 HISTORY_HOURS = 24
+# Model numbers Sonos lists as legacy (stability updates only): first-gen
+# SYMFONISK table lamp (S20) and bookshelf (S21), Play:1/3/5 gen 1, Connect...
+LEGACY_MODELS = {"S1", "S3", "S5", "S9", "S12", "S20", "S21", "ZP80", "ZP90", "ZP100", "ZP120"}
 MIN_ROUNDS = 200          # below this, the history is too thin to trust
 LIVE_PINGS = 5
 
@@ -54,7 +64,7 @@ def _history(hours=HISTORY_HOURS):
             elif r["k"] == "radio":
                 for n, v in r["speakers"].items():
                     if v.get("mhz"):
-                        band[n] = v["mhz"] < 3000
+                        band[n] = v["mhz"] < 3000 and "station" in v.get("mode", "station")
     if rounds < MIN_ROUNDS:
         return {}
     return {n: (bad.get(n, 0) / rounds, statistics.median(ms[n]) if ms.get(n) else 999, band.get(n, False))
@@ -72,16 +82,29 @@ def _live(zones):
         return dict(ex.map(probe, zones))
 
 
+def _legacy(zone):
+    """True for models Sonos only gives stability updates (see LEGACY_MODELS)."""
+    try:
+        with urllib.request.urlopen(f"http://{zone.ip_address}:1400/xml/device_description.xml", timeout=3) as r:
+            m = re.search(r"<modelNumber>(.*?)</modelNumber>", r.read().decode(errors="replace"))
+        return bool(m) and m.group(1).strip().upper() in LEGACY_MODELS
+    except OSError:
+        return False
+
+
 def rank(zones):
     """Zones best-first, plus where the scores came from ('history' or 'live')."""
     scores, source = _history(), "history"
     if not all(key(z) in scores for z in zones):
         scores, source = _live(zones), "live"
 
+    legacy = {key(z): _legacy(z) for z in zones}
+
     def score(z):
         bad, med, slow_band = scores.get(key(z), (1.0, 999, False))
-        return (slow_band, round(bad, 4), med)
-    return sorted(zones, key=score), source, {key(z): scores.get(key(z)) for z in zones}
+        return (legacy[key(z)], slow_band, round(bad, 4), med)
+    info = {key(z): (*scores.get(key(z), (1.0, 999, False)), legacy[key(z)]) for z in zones}
+    return sorted(zones, key=score), source, info
 
 
 def best(zones):
