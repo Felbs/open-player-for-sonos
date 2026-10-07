@@ -76,12 +76,39 @@ def test_leader_ranking_prefers_reliable_5ghz(tmp_path, monkeypatch):
             self.player_name, self.ip_address = name, ip
     zones = [Z("Den", "192.0.2.21"), Z("Hall", "192.0.2.22"), Z("Loft", "192.0.2.23")]
     monkeypatch.setattr(leader, "_legacy", lambda z: False)
+    monkeypatch.setattr(leader, "_wired", lambda zs: {leader.key(z): False for z in zs})
     ordered, source, _ = leader.rank(zones)
     assert source == "history"
     assert [z.player_name for z in ordered] == ["Loft", "Den", "Hall"]
     # an old (legacy) speaker goes last even with the best numbers
     monkeypatch.setattr(leader, "_legacy", lambda z: z.player_name == "Loft")
     assert [z.player_name for z in leader.rank(zones)[0]] == ["Den", "Hall", "Loft"]
+    # a speaker wired with Ethernet leads, whatever its numbers
+    monkeypatch.setattr(leader, "_legacy", lambda z: False)
+    monkeypatch.setattr(leader, "_wired", lambda zs: {leader.key(z): z.player_name == "Hall" for z in zs})
+    assert leader.rank(zones)[0][0].player_name == "Hall"
+
+
+def test_leader_ranking_radio_errors_break_ties(tmp_path, monkeypatch):
+    from openplayer import leader
+    monkeypatch.setattr(netwatch, "DIR", tmp_path)
+    monkeypatch.setattr(leader, "MIN_ROUNDS", 10)
+    monkeypatch.setattr(leader, "_legacy", lambda z: False)
+    monkeypatch.setattr(leader, "_wired", lambda zs: {leader.key(z): False for z in zs})
+    now = time.time()
+    rows = [{"t": now - 300 + i * 5, "k": "ping", "ms": {"Den·21": 6.0, "Loft·23": 5.0, "router": 3.0}}
+            for i in range(50)]
+    rows += [{"t": now - 60 * i, "k": "radio", "speakers": {
+        "Den·21": {"mhz": 2412, "mode": "INFRA (sonosnet)", "phy": 20000},
+        "Loft·23": {"mhz": 2412, "mode": "INFRA (sonosnet)", "phy": 110000}}} for i in range(5)]
+    (tmp_path / netwatch._file().name).write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    class Z:
+        def __init__(self, name, ip):
+            self.player_name, self.ip_address = name, ip
+    zones = [Z("Den", "192.0.2.21"), Z("Loft", "192.0.2.23")]
+    # both answer every check (and Loft a bit faster), but Loft is drowning in radio errors
+    assert [z.player_name for z in leader.rank(zones)[0]] == ["Den", "Loft"]
 
 
 def test_ask_any_skips_a_speaker_that_fails_mid_request(monkeypatch):

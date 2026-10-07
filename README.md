@@ -93,7 +93,9 @@ network monitor can show you why. It's light: a ping to each speaker every
    laptop's side don't get blamed on your speakers.
 5. `openplayer leaders` ranks your rooms as **group leaders**. The leader
    receives the music and feeds every other room, so a shaky leader makes the
-   whole group stumble. When you tick several rooms, the app picks the best
+   whole group stumble. A speaker **wired to the router with Ethernet** always
+   ranks first (it gets the music over the cable and sends it over the air
+   only once); then reliability and radio errors decide, and older models go last. When you tick several rooms, the app picks the best
    leader automatically. `openplayer lead` hands the current group to the best
    room without stopping the music.
 
@@ -104,6 +106,9 @@ What it found in the home it was built in, and the fixes that came out of it:
   faster across the board.
 - **A weak or older speaker leading the group** caused trouble in other rooms.
   Older "legacy" models are now ranked last as leaders.
+- **Pings can look perfect while music cuts out.** On Sonos's own network the
+  cut-outs matched each speaker's *radio errors*, not missed pings. Letting the
+  **wired** speaker lead stopped them, which is also Sonos's own advice.
 
 ## Good to know
 
