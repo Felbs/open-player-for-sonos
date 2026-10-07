@@ -12,7 +12,9 @@ import socket
 import subprocess
 from pathlib import Path
 
+import requests
 import soco
+import soco.exceptions
 
 def _xdg(var, default):
     return Path(os.environ.get(var) or Path.home() / default) / "openplayer"
@@ -64,18 +66,36 @@ def speaker_ips(rescan=False):
     return scan()
 
 
+def ask_any(fn):
+    """fn(speaker) on the first speaker that answers.
+
+    A speaker can pass the port check and still fail a moment later (e.g.
+    while the system switches networks), so keep trying the others.
+    """
+    tried = set()
+    for rescan in (False, True):
+        for ip in speaker_ips(rescan=rescan):
+            if ip in tried or not _port_open(ip):
+                continue
+            tried.add(ip)
+            try:
+                return fn(soco.SoCo(ip))
+            except (OSError, requests.RequestException, soco.exceptions.SoCoException):
+                continue
+    raise SystemExit("No Sonos speakers are answering on this network right now.")
+
+
 def any_speaker():
-    for ip in speaker_ips():
-        if _port_open(ip):
-            return soco.SoCo(ip)
-    for ip in speaker_ips(rescan=True):
-        return soco.SoCo(ip)
-    raise SystemExit("No Sonos speakers found on this network.")
+    def answering(sp):
+        sp.household_id          # a real request, so a dead speaker fails here
+        return sp
+    return ask_any(answering)
 
 
 def rooms():
     """One entry per room (stereo pairs and home-theatre sets count once)."""
-    by_name = {z.player_name: z for z in any_speaker().visible_zones}
+    zones = ask_any(lambda sp: list(sp.visible_zones))
+    by_name = {z.player_name: z for z in zones}
     return [by_name[n] for n in sorted(by_name)]
 
 
@@ -88,7 +108,7 @@ def room(name):
 
 
 def favorites():
-    fav = any_speaker().music_library.get_sonos_favorites()
+    fav = ask_any(lambda sp: sp.music_library.get_sonos_favorites())
     out = []
     for f in fav:
         uri = f.resources[0].uri if f.resources else ""

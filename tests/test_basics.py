@@ -78,3 +78,40 @@ def test_leader_ranking_prefers_reliable_5ghz(tmp_path, monkeypatch):
     ordered, source, _ = leader.rank(zones)
     assert source == "history"
     assert [z.player_name for z in ordered] == ["Loft", "Den", "Hall"]
+
+
+def test_ask_any_skips_a_speaker_that_fails_mid_request(monkeypatch):
+    import requests
+    calls = []
+
+    class Fake:
+        def __init__(self, ip):
+            self.ip = ip
+
+        @property
+        def visible_zones(self):
+            calls.append(self.ip)
+            if self.ip == "192.0.2.1":
+                raise requests.ConnectionError("no route to host")
+            return ["zone"]
+
+    monkeypatch.setattr(core, "speaker_ips", lambda rescan=False: ["192.0.2.1", "192.0.2.2"])
+    monkeypatch.setattr(core, "_port_open", lambda ip, timeout=0.6: True)
+    monkeypatch.setattr(core.soco, "SoCo", Fake)
+    assert core.ask_any(lambda sp: sp.visible_zones) == ["zone"]
+    assert calls == ["192.0.2.1", "192.0.2.2"]
+
+
+def test_monitor_keeps_a_speaker_that_stops_answering(monkeypatch):
+    desc = {"192.0.2.5": "<roomName>Patio</roomName><modelNumber>S1</modelNumber>RINCON_AAAAAAAAAA0101400"}
+
+    def fake_get(ip, path, timeout=3):
+        if ip not in desc:
+            raise OSError("no route to host")
+        return desc[ip]
+    monkeypatch.setattr(netwatch, "_get", fake_get)
+    monkeypatch.setattr(core, "scan", lambda: ["192.0.2.5"])         # the Den is off the network now
+    known = {"192.0.2.6": {"name": "Den·6", "model": "S2", "mac5": "BBBBBBBBBB"}}
+    out = netwatch.speakers(known)
+    assert out["192.0.2.5"]["name"] == "Patio·5"
+    assert out["192.0.2.6"]["name"] == "Den·6"                      # still watched, will show as lost

@@ -52,19 +52,42 @@ def _get(ip, path, timeout=3):
         return r.read().decode(errors="replace")
 
 
-def speakers():
-    """ip -> {'name': 'Kitchen·78', 'mac5': first 5 MAC bytes, 'model': 'S33'}."""
+KNOWN = DIR / "speakers.json"
+
+
+def speakers(known=None):
+    """ip -> {'name': 'Kitchen·78', 'mac5': first 5 MAC bytes, 'model': 'S33'}.
+
+    Scans the whole network (not the cache) and keeps every speaker in
+    `known` that doesn't answer right now, so a speaker that drops off is
+    still pinged (and shows up as lost) instead of silently disappearing.
+    """
+    known = dict(known or {})
     out = {}
-    for ip in core.speaker_ips():
+    for ip in sorted(set(core.scan()) | set(known)):
         try:
             x = _get(ip, "/xml/device_description.xml")
         except OSError:
+            if ip in known:
+                out[ip] = known[ip]
             continue
         g = lambda k: (re.search(f"<{k}>(.*?)</{k}>", x) or [None, "?"])[1]
         rincon = re.search(r"RINCON_([0-9A-F]{12})", x)
         out[ip] = {"name": f"{g('roomName')}·{ip.split('.')[-1]}", "model": g("modelNumber"),
-                   "mac5": rincon.group(1)[:10] if rincon else ""}
+                   "mac5": rincon.group(1)[:10] if rincon else "", "seen": True}
+    # A speaker that moved to a new address: drop its old, silent entry.
+    live = {v["mac5"] for v in out.values() if v.get("seen")}
+    out = {ip: v for ip, v in out.items() if v.get("seen") or v["mac5"] not in live}
+    for v in out.values():
+        v.pop("seen", None)
     return out
+
+
+def _load_known():
+    try:
+        return json.loads(KNOWN.read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def _ping(ip):
@@ -103,55 +126,65 @@ def _gateway():
 
 
 def run():
-    """The monitor loop (openplayer-watch.service)."""
-    spk = speakers()
-    names = {ip: v["name"] for ip, v in spk.items()}
-    by_mac5 = {v["mac5"]: v["name"] for v in spk.values()}
+    """The monitor loop (openplayer-watch.service). Never exits on its own:
+    problems are written as "error" lines and the loop carries on."""
+    spk = speakers(_load_known())
+    while not spk:                      # e.g. started before Wi-Fi came up
+        write("error", where="start", msg="no speakers found; retrying in 30 s")
+        time.sleep(30)
+        spk = speakers(_load_known())
     write("start", speakers=spk)
     for old in DIR.glob("*.jsonl"):
         if old.stat().st_mtime < time.time() - KEEP_DAYS * 86400:
             old.unlink()
-    last = {"radio": 0, "play": 0, "wifi": 0, "spk": time.time()}
+    last = {"radio": 0, "play": 0, "wifi": 0, "spk": 0}
     last_play = None
     pool = cf.ThreadPoolExecutor(12)
     while True:
         t0 = time.time()
-        targets = dict(names)
-        gw = _gateway()
-        if gw:
-            targets[gw] = "router"       # laptop <-> router: tells laptop-side hiccups apart
-        rtts = dict(zip(targets.values(), pool.map(_ping, targets)))
-        write("ping", ms=rtts)
-        if t0 - last["play"] >= 10:
-            last["play"] = t0
-            try:
-                play = {}
-                for z in core.rooms():
-                    c = z.group.coordinator
-                    play[z.player_name] = [c.get_current_transport_info()["current_transport_state"],
-                                           c.player_name]
-                if play != last_play:
-                    write("play", rooms=play)
-                    last_play = play
-            except Exception as e:
-                write("error", where="play", msg=str(e)[:200])
-        if t0 - last["radio"] >= 60:
-            last["radio"] = t0
-
-            def radio(ip):
+        try:
+            if t0 - last["spk"] >= 300:     # speakers come and go; addresses change
+                last["spk"] = t0
+                new = speakers(spk) or spk
+                if new != spk:
+                    write("speakers", speakers=new)
+                spk = new
+                KNOWN.write_text(json.dumps(spk))
+                names = {ip: v["name"] for ip, v in spk.items()}
+                by_mac5 = {v["mac5"]: v["name"] for v in spk.values()}
+            targets = dict(names)
+            gw = _gateway()
+            if gw:
+                targets[gw] = "router"       # laptop <-> router: tells laptop-side hiccups apart
+            rtts = dict(zip(targets.values(), pool.map(_ping, targets)))
+            write("ping", ms=rtts)
+            if t0 - last["play"] >= 10:
+                last["play"] = t0
                 try:
-                    return names[ip], _radio(ip, by_mac5)
-                except Exception as e:
-                    return names[ip], {"error": str(e)[:120]}
-            write("radio", speakers=dict(pool.map(radio, names)))
-        if t0 - last["wifi"] >= 300:
-            last["wifi"] = t0
-            write("wifi", aps=_wifi())
-        if t0 - last["spk"] >= 3600:           # addresses can change
-            last["spk"] = t0
-            spk = speakers() or spk
-            names = {ip: v["name"] for ip, v in spk.items()}
-            by_mac5 = {v["mac5"]: v["name"] for v in spk.values()}
+                    play = {}
+                    for z in core.rooms():
+                        c = z.group.coordinator
+                        play[z.player_name] = [c.get_current_transport_info()["current_transport_state"],
+                                               c.player_name]
+                    if play != last_play:
+                        write("play", rooms=play)
+                        last_play = play
+                except (Exception, SystemExit) as e:
+                    write("error", where="play", msg=str(e)[:200])
+            if t0 - last["radio"] >= 60:
+                last["radio"] = t0
+
+                def radio(ip):
+                    try:
+                        return names[ip], _radio(ip, by_mac5)
+                    except Exception as e:
+                        return names[ip], {"error": str(e)[:120]}
+                write("radio", speakers=dict(pool.map(radio, names)))
+            if t0 - last["wifi"] >= 300:
+                last["wifi"] = t0
+                write("wifi", aps=_wifi())
+        except Exception as e:
+            write("error", where="loop", msg=f"{type(e).__name__}: {e}"[:200])
         time.sleep(max(0.0, 5 - (time.time() - t0)))
 
 
